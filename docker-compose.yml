@@ -1,0 +1,20 @@
+
+version: '3.8'
+services:
+  app:
+    build: .
+    container_name: agentic_app
+    ports:
+      - "8000:8000"   # combined API (upload, predictor, scheduler, maintenance)
+      - "8765:8765"   # telematics ws (also hosted by app)
+      - "8501:8501"   # streamlit UI
+    volumes:
+      - ./data:/app/data
+    environment:
+      - PYTHONPATH=/app
+    networks:
+      - agentic_net
+
+networks:
+  agentic_net:
+    driver: bridge
