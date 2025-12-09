@@ -15,7 +15,7 @@ export default function ChatbotWidget({ vehicleId, styles }) {
 
   const fetchAlerts = async () => {
     try {
-      const res = await axios.get("http://127.0.0.1:8000/alerts/active")
+      const res = await axios.get("http://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/alerts/active")
       setAlerts(res.data.alerts || [])
     } catch (e) {
       console.error("Failed to load alerts", e)
@@ -28,7 +28,7 @@ export default function ChatbotWidget({ vehicleId, styles }) {
     if (overrideQuestion) setQuestion(overrideQuestion)
     setLoading(true)
     try {
-      const res = await axios.post("http://127.0.0.1:8000/chatbot/query", {
+      const res = await axios.post("http://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/chatbot/query", {
         vehicle_id: vehicleId,
         question: q,
       })
