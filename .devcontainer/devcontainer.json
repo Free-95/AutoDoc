@@ -15,7 +15,17 @@
       ]
     }
   },
-  "forwardPorts": [5173, 8000, 5432],
+  "forwardPorts": [5173, 8001, 5432],
+  "portsAttributes": {
+    "5173": {
+      "label": "Frontend",
+      "visibility": "public"
+    },
+    "8001": {
+      "label": "Backend",
+      "visibility": "public"
+    }
+  },
   "postCreateCommand": "pip install -r backend/requirements.txt && cd frontend && npm install",
   "remoteUser": "vscode"
 }

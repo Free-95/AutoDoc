@@ -9,7 +9,7 @@ export default function ManagerBookings({ centerId, serviceCenters, styles, onCe
     if (!cid) return
     setLoading(true)
     try {
-      const res = await axios.get(`https://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev//manager/bookings`, { params: { center_id: cid } })
+      const res = await axios.get(`https://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/manager/bookings`, { params: { center_id: cid } })
       setBookings(res.data.bookings || [])
     } catch (e) {
       console.error("Failed to load bookings", e)
