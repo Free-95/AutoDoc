@@ -28,7 +28,7 @@ load_dotenv()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg2://postgres:postgres@localhost:5432/autodoc",
+    "postgresql://neondb_owner:npg_v17FNpzbkfLA@ep-dry-union-a1asxvwq-pooler.ap-southeast-1.aws.neon.tech/neondb?sslmode=require",
 )
 
 engine = create_engine(DATABASE_URL, future=True, echo=False)

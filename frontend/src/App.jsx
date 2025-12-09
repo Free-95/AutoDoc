@@ -39,7 +39,7 @@ function App() {
   const handleLogin = async (e) => {
     e.preventDefault()
     try {
-      const res = await axios.post("http://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/login", {
+      const res = await axios.post("https://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev//login", {
         username: loginUser, password: loginPass, role: loginRole
       })
       setSession(res.data.data)
@@ -55,7 +55,7 @@ function App() {
   const addStock = async () => {
     if(!newVin) return alert("Enter VIN")
     try {
-      const res = await axios.post("http://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/dealer/add-stock", {
+      const res = await axios.post("https://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev//dealer/add-stock", {
         dealer_id: session.id, vehicle_id: newVin, model: newModel
       })
       setSession({...session, inventory: res.data})
@@ -65,7 +65,7 @@ function App() {
 
   const assignCar = async (vin) => {
     try {
-      const res = await axios.post("http://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/dealer/assign", {
+      const res = await axios.post("https://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev//dealer/assign", {
         dealer_id: session.id, vehicle_id: vin, target_username: assignTarget
       })
       setSession({...session, inventory: res.data.inventory, sold_vehicles: res.data.sold})
@@ -76,7 +76,7 @@ function App() {
   const toggleAttack = async () => {
     const next = !attackMode
     setAttackMode(next)
-    await axios.post(`http://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/toggle-attack/${next}`)
+    await axios.post(`https://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev//toggle-attack/${next}`)
   }
 
   const bookService = async () => {
@@ -84,7 +84,7 @@ function App() {
       return alert("No issue detected to book against yet.")
     }
     try {
-      const res = await axios.post("http://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/book-service", {
+      const res = await axios.post("https://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev//book-service", {
         vehicle_id: selectedCar.id,
         owner_name: session.name,
         issue: telemetry.repair_recommendation.issue,
@@ -112,7 +112,7 @@ function App() {
     const fetchSecurity = async () => {
       if (role !== "dealer") return
       try {
-        const res = await axios.get("http://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev/security/logs")
+        const res = await axios.get("https://crispy-space-happiness-5g5j57v4q5wwh494v-8001.app.github.dev//security/logs")
         setSecurityLogs(res.data.logs || [])
       } catch (e) { /* ignore */ }
     }
