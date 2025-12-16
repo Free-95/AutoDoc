@@ -55,7 +55,7 @@ def query_db(query, args=(), one=False):
 
 @tool
 def fetch_telematics_data(vehicle_id: str):
-    """Fetches LIVE data from the SQL Fleet Database."""
+    """Fetches LIVE data for a SINGLE vehicle from the SQL Fleet Database."""
     row = query_db("SELECT * FROM vehicles WHERE vehicle_id = ?", (vehicle_id,), one=True)
     
     if not row:
@@ -70,6 +70,53 @@ def fetch_telematics_data(vehicle_id: str):
         "status": row["status"],
         "odometer": row["odometer"]
     }
+
+@tool
+def analyze_fleet_trends(scope: str = "all"):
+    """
+    Analyzes the ENTIRE fleet to forecast service center demand and workload.
+    """
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # 1. Get Fleet Health Distribution
+    cursor.execute("SELECT status, COUNT(*) FROM vehicles GROUP BY status")
+    status_raw = cursor.fetchall()
+    status_dist = {row[0]: row[1] for row in status_raw}
+
+    # 2. Identify High-Risk Vehicles
+    cursor.execute("SELECT vehicle_id, model, error_code FROM vehicles WHERE oil_life < 20 OR error_code != 'None'")
+    high_risk_cars = cursor.fetchall()
+    
+    demand_count = len(high_risk_cars)
+    estimated_hours = demand_count * 3 
+
+    # 3. Get High Mileage Trends
+    cursor.execute("SELECT AVG(odometer) FROM vehicles")
+    avg_odometer = cursor.fetchone()[0]
+
+    conn.close()
+
+    return f"""
+    📊 FLEET FORECAST REPORT
+    ------------------------
+    1. Health Overview: {status_dist}
+    2. Immediate Service Demand: {demand_count} vehicles require attention.
+       - Details: {[f"{c[0]} ({c[1]})" for c in high_risk_cars]}
+    3. Projected Service Center Workload: {estimated_hours} Hours of labor required this week.
+    4. Long-term Wear: Average fleet mileage is {int(avg_odometer):,} miles.
+    
+    RECOMMENDATION FOR SCHEDULER:
+    {'🔴 Heavy Load - Open more slots immediately.' if demand_count > 3 else '🟢 Normal Load - Standard scheduling applies.'}
+    """
+
+@tool
+def get_maintenance_history(vehicle_id: str):
+    """Fetches historical service records for a specific vehicle."""
+    rows = query_db("SELECT * FROM maintenance_history WHERE vehicle_id = ? ORDER BY service_date DESC LIMIT 5", (vehicle_id,))
+    if not rows:
+        return "No maintenance history found."
+    return "\n".join([f"- {row['service_date']}: {row['service_type']} ({row['description']})" for row in rows])
 
 @tool
 def diagnose_issue(error_code: str, engine_temp: int):
@@ -92,27 +139,37 @@ def diagnose_issue(error_code: str, engine_temp: int):
 @tool
 def get_rca_insights(diagnosis: str):
     """Queries the Manufacturing CAPA database."""
-    # Fetch all CAPA records to check for matches
+    print(f"   [Tool] RCA Analysis running for: {diagnosis}")
+    
+    code_map = {
+        "P0118": "Coolant Sensor",
+        "P0420": "Catalytic Converter",
+        "overheating": "Coolant Sensor"
+    }
+    
+    search_terms = [diagnosis]
+    
+    for code, component in code_map.items():
+        if code.lower() in diagnosis.lower():
+            search_terms.append(component)
+            
     rows = query_db("SELECT * FROM capa_records")
     
     matches = []
     for row in rows:
-        # Check if the component or defect listed in DB is mentioned in the diagnosis
-        if row["component"] in diagnosis or row["defect_type"] in diagnosis:
-            matches.append(f"RCA INSIGHT: Batch {row['batch_id']} - {row['action_required']} (CAPA Match)")
+        for term in search_terms:
+            if term in row["component"] or term in row["defect_type"] or row["component"] in term:
+                matches.append(f"RCA INSIGHT: Batch {row['batch_id']} - {row['action_required']} (CAPA Match: {row['component']})")
+                break 
             
     if matches:
         return " ".join(matches)
         
-    # Fallback logic if DB lookup misses specific keywords but issue is known
-    if "Coolant" in diagnosis:
-         return "RCA INSIGHT: Potential Coolant Leak. Check CAPA-992 (Water Pump Seal)."
     return "No recurring manufacturing defects found in CAPA DB."
 
 @tool
 def check_schedule_availability():
     """Queries OPEN slots from appointments table."""
-    # Get the next 4 unbooked slots
     rows = query_db("SELECT slot_time FROM appointments WHERE is_booked = 0 LIMIT 4")
     
     if not rows:
@@ -124,22 +181,18 @@ def check_schedule_availability():
 @tool
 def book_appointment(slot: str, vehicle_id: str):
     """Books the appointment. Handles fuzzy time matching (e.g., '9am' -> '09:00')."""
-    # 1. Normalize the input
     clean_slot = slot.lower().replace("am", "").replace("pm", "").strip()
     
-    # Pad single digit hours (e.g., "9:00" -> "09:00")
     if ":" in clean_slot:
         hour, minute = clean_slot.split(":")
         if len(hour) == 1:
             clean_slot = f"0{hour}:{minute}"
     
-    # If user typed just "9", treat it as "09:00"
     if ":" not in clean_slot and len(clean_slot) <= 2:
          clean_slot = f"{int(clean_slot):02d}:00"
 
     print(f"  [Tool] Attempting to book '{slot}' (Normalized: '{clean_slot}')...")
 
-    # 2. Try to find a matching OPEN slot in the DB
     existing = query_db(
         "SELECT id, slot_time FROM appointments WHERE slot_time LIKE ? AND is_booked = 0", 
         (f"%{clean_slot}%",), 
@@ -149,7 +202,6 @@ def book_appointment(slot: str, vehicle_id: str):
     if not existing:
         return f"Slot unavailable. Please pick another time from the list."
     
-    # 3. Book it
     query_db("UPDATE appointments SET is_booked = 1, booked_vehicle_id = ? WHERE id = ?", (vehicle_id, existing["id"]))
     
     return f"BOOKING COMPLETE: {vehicle_id} scheduled for {existing['slot_time']}."
@@ -161,8 +213,6 @@ def update_vehicle_status(vehicle_id: str, status: str):
     return f"Status for {vehicle_id} updated to {status}."
 
 # --- DUMMY TOOLS (Safety Net) ---
-# FIX: Added docstrings to these functions to resolve ValueError
-
 @tool
 def brave_search(query: str):
     """Performs a web search (Simulation Mode)."""
@@ -183,6 +233,15 @@ def log_customer_feedback(feedback: str, rating: int):
     """Logs customer feedback for quality assurance."""
     return "Feedback saved."
 
+@tool
+def report_manufacturing_defect(component: str, issue_description: str, vehicle_id: str):
+    """
+    Feeds a new potential defect insight back to the Manufacturing/Quality team.
+    Use this when multiple vehicles exhibit the same unexplained failure.
+    """
+    print(f"🏭 REPORTING TO FACTORY: Potential defect in {component} observed in {vehicle_id}: {issue_description}")
+    return "Defect report submitted to Engineering Team for analysis."
+
 # --- 4. STATE DEFINITION ---
 class AgentState(TypedDict):
     messages: Annotated[List[BaseMessage], operator.add]
@@ -202,38 +261,52 @@ def ueba_guardrail_node(state: AgentState):
 
 data_analyst = create_react_agent(
     llm_worker, 
-    tools=[fetch_telematics_data, brave_search], 
-    prompt="You are a Data Retrieval Bot. If vehicle ID is known, call tool. Output data summary and STOP."
+    tools=[fetch_telematics_data, analyze_fleet_trends, get_maintenance_history, brave_search], 
+    prompt=(
+        "You are a Lead Data Analyst. "
+        "1. If asked about a SPECIFIC vehicle, use 'fetch_telematics_data' and 'get_maintenance_history'. "
+        "2. If asked about 'Fleet Status', 'Forecasting', or 'Demand', use 'analyze_fleet_trends'. "
+        "3. Output the data summary clearly and then STOP."
+    )
 )
 
-# UPDATED: Diagnostician must be descriptive
+# UPDATED: NO QUESTIONS, JUST FACTS
 diagnostician = create_react_agent(
     llm_worker, 
     tools=[diagnose_issue, update_vehicle_status, send_alert_to_maintenance_team, fetch_telematics_data, brave_search], 
     prompt=(
-        "You are a Diagnostician. "
-        "1. Analyze the tool output data. If Temp > 110, it is CRITICAL. "
-        "2. Output a CLEAR, HUMAN-READABLE diagnosis (e.g., 'Detected Engine Overheating due to Sensor Failure'). "
-        "3. DO NOT just say 'Critical'. Explain WHY based on the tool output."
+        "You are an empathetic but urgent Vehicle Health Expert. "
+        "1. When identifying a CRITICAL issue, explain the RISK in plain English. "
+        "2. DO NOT ASK 'Would you like to proceed?' or 'Should I book?'. "
+        "3. Instead, state: 'I am alerting the maintenance team and checking appointment slots immediately.' "
+        "4. Your job is to alarm the user enough to fix it, then STOP."
     )
 )
 
+# UPDATED: CONFIDENT
 quality_engineer = create_react_agent(
     llm_worker, 
-    tools=[get_rca_insights], 
-    prompt="You are a Quality Engineer. Call tool ONCE. Then start response with 'QUALITY CHECK COMPLETE'."
+    tools=[get_rca_insights, report_manufacturing_defect], 
+    prompt=(
+        "You are a Senior Quality Engineer. "
+        "1. Check 'get_rca_insights'. "
+        "2. If a match is found, say: 'Good news—we have seen this before. It is a known issue with [Batch/Part].' "
+        "3. State the solution clearly. "
+        "4. End with 'QUALITY CHECK COMPLETE'."
+    )
 )
 
-# UPDATED: Scheduler automatically shows slots
+# UPDATED: THE CLOSER
 scheduler = create_react_agent(
     llm_worker, 
     tools=[check_schedule_availability, book_appointment, send_notification_to_owner, update_vehicle_status], 
     prompt=(
-        "You are a Service Scheduler. "
-        "1. If 'QUALITY CHECK COMPLETE' is in history, call 'check_schedule_availability' immediately. "
-        "2. Output EXACTLY: 'Service Recommended. Available slots: [List Slots]'. "
-        "3. Do NOT ask 'Would you like to proceed?'. Just present the slots."
-        "4. If user provides a time, call 'book_appointment'."
+        "You are a persuasive Service Concierge. "
+        "1. Your goal is to secure the booking. Do NOT ask 'Do you want to proceed?'. "
+        "2. Assume the user wants to book. Call 'check_schedule_availability' immediately. "
+        "3. State: 'To prevent damage, I have located priority slots at [List Slots].' "
+        "4. End with a specific Call to Action: 'Which of these times works best for you?'"
+        "5. If user provides a time, call 'book_appointment'."
     )
 )
 
@@ -272,19 +345,22 @@ def supervisor_node(state: AgentState):
     if isinstance(last_msg, AIMessage):
         content = last_msg.content
         
+        # 0. Data Analyst -> STOP
+        if "FLEET FORECAST REPORT" in content:
+            return {"next": "FINISH"}
+
         # 1. Diag -> Quality
         if "CRITICAL" in content and "QUALITY CHECK COMPLETE" not in history_str:
             return {"next": "QualityEngineer"}
             
-        # 2. Quality -> Scheduler (AUTO-FETCH SLOTS)
+        # 2. Quality -> Scheduler (Always transition to booking options)
         if "QUALITY CHECK COMPLETE" in content:
-            # If we haven't shown slots yet, go to scheduler
             if "Available slots" not in history_str and "OPEN SLOTS" not in history_str:
                 return {"next": "Scheduler"}
             else:
                  return {"next": "FINISH"} 
 
-        # 3. Scheduler (Slots Shown) -> Stop
+        # 3. Scheduler (Slots Shown) -> Stop and wait for user choice
         if "Available slots" in content or "OPEN SLOTS" in content:
             return {"next": "FINISH"}
 
@@ -296,24 +372,39 @@ def supervisor_node(state: AgentState):
         return {"next": "FINISH"}
 
     # --- CASE 2: HUMAN JUST SPOKE ---
+    user_text = last_msg.content.lower()
+
+    # --- NEW: THE "YES" TRAP (Solves the looping issue) ---
+    # If user says "Yes/Do it", and we haven't shown slots yet, FORCE Scheduler.
+    if "yes" in user_text or "proceed" in user_text or "fix it" in user_text or "do it" in user_text:
+        if "OPEN SLOTS" not in history_str and "Available slots" not in history_str:
+            return {"next": "Scheduler"}
     
-    # 1. Missing basic data? -> Data Analyst
+    # 0. Manufacturing Questions
+    if "manufacturing" in user_text or "defect" in user_text or "common issue" in user_text or "rca" in user_text:
+        return {"next": "QualityEngineer"}
+
+    # 1. Fleet/Forecast request
+    if "fleet" in user_text or "forecast" in user_text or "demand" in user_text:
+        return {"next": "DataAnalyst"}
+
+    # 2. Missing basic data
     if "Engine Temp" not in history_str and "error_code" not in history_str:
         return {"next": "DataAnalyst"}
 
-    # 2. Data present, but no diagnosis? -> Diagnostician
+    # 3. Data present, no diagnosis
     if "CRITICAL" not in history_str and "Status: Normal" not in history_str:
         return {"next": "Diagnostician"}
 
-    # 3. Critical issue, but Quality not checked? -> Quality Engineer
+    # 4. Critical issue, Quality not checked
     if "CRITICAL" in history_str and "QUALITY CHECK COMPLETE" not in history_str:
         return {"next": "QualityEngineer"}
 
-    # 4. Quality done, but not booked? -> Scheduler
+    # 5. Quality done, not booked
     if "QUALITY CHECK COMPLETE" in history_str and "BOOKING COMPLETE" not in history_str:
         return {"next": "Scheduler"}
 
-    # 5. Booking done, but no feedback? -> Feedback Agent
+    # 6. Booking done, no feedback
     if "BOOKING COMPLETE" in history_str and "Feedback saved" not in history_str:
          return {"next": "FeedbackAgent"}
 

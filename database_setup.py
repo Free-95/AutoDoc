@@ -1,4 +1,3 @@
-# database_setup.py
 import sqlite3
 import random
 from datetime import datetime, timedelta
@@ -11,11 +10,9 @@ def init_db():
     cursor = conn.cursor()
 
     # --- 1. OPTIMIZATION: ENABLE WAL MODE ---
-    # This is crucial for handling simultaneous reads (Agent) and writes (Simulation)
-    # without hitting "Database Locked" errors.
     cursor.execute("PRAGMA journal_mode=WAL;")
 
-    # --- 2. RESET TABLES (Start Fresh) ---
+    # --- 2. RESET TABLES ---
     cursor.execute("DROP TABLE IF EXISTS vehicles")
     cursor.execute("DROP TABLE IF EXISTS maintenance_history")
     cursor.execute("DROP TABLE IF EXISTS capa_records")
@@ -62,8 +59,9 @@ def init_db():
     )''')
 
     # --- 4. SEED DATA ---
-    print("   ...Seeding 10 Vehicles...")
     
+    # A. Vehicles (The 10 Specific Profiles)
+    print("   ...Seeding 10 Vehicles...")
     vehicles = [
         ("Vehicle-123", "F-150", 115, 40, 32, 45000, "P0118", "Active"), # CRITICAL
         ("Vehicle-101", "Sedan", 90, 85, 35, 12000, "None", "Active"),
@@ -78,32 +76,57 @@ def init_db():
     ]
     cursor.executemany("INSERT INTO vehicles VALUES (?, ?, ?, ?, ?, ?, ?, ?)", vehicles)
 
-    # History
-    history = [
-        ("Vehicle-123", "2024-01-10", "Oil Change", "Standard synthetic oil change", 80),
-        ("Vehicle-123", "2023-08-15", "Tire Rotation", "Rotated all 4 tires", 40),
-        ("Vehicle-108", "2024-02-01", "Brake Pad", "Replaced front brake pads", 200),
+    # B. Enhanced History Seeding (NEW SECTION)
+    print("   ...Generating Procedural Maintenance History...")
+    
+    service_options = [
+        ("Oil Change", "Standard synthetic oil change and filter replacement", 80),
+        ("Tire Rotation", "Rotated tires and checked pressure", 40),
+        ("Brake Inspection", "Visual inspection of pads and rotors", 50),
+        ("Fluid Top-off", "Topped off coolant and wiper fluid", 30),
+        ("Air Filter", "Replaced engine air intake filter", 45),
+        ("Battery Check", "Voltage test and terminal cleaning", 25)
     ]
-    cursor.executemany("INSERT INTO maintenance_history (vehicle_id, service_date, service_type, description, cost) VALUES (?, ?, ?, ?, ?)", history)
 
-    # CAPA Records
+    history_records = []
+    
+    # 1. Add specific narrative history for our Critical Car (123)
+    history_records.append(("Vehicle-123", "2024-01-10", "Oil Change", "Standard synthetic oil change", 80))
+    history_records.append(("Vehicle-123", "2023-08-15", "Tire Rotation", "Rotated all 4 tires", 40))
+    
+    # 2. Add specific history for the other Critical Car (108)
+    history_records.append(("Vehicle-108", "2024-02-01", "Brake Pad", "Replaced front brake pads", 200))
+
+    # 3. Generate random history for EVERY vehicle to flesh out the DB
+    today = datetime.now()
+    all_vehicle_ids = [v[0] for v in vehicles]
+    
+    for vid in all_vehicle_ids:
+        # Give each car 3 to 7 random past service events
+        num_services = random.randint(3, 7)
+        for _ in range(num_services):
+            # Pick a random date in the last 2 years
+            days_ago = random.randint(10, 700)
+            service_date = (today - timedelta(days=days_ago)).strftime("%Y-%m-%d")
+            
+            # Pick a random service type
+            s_type, s_desc, s_cost = random.choice(service_options)
+            
+            history_records.append((vid, service_date, s_type, s_desc, s_cost))
+
+    cursor.executemany("INSERT INTO maintenance_history (vehicle_id, service_date, service_type, description, cost) VALUES (?, ?, ?, ?, ?)", history_records)
+
+    # C. CAPA Records
     capa = [
         ("Coolant Sensor", "Seal Failure", "Replace with Part #992-B (Upgraded Gasket)", "Batch-992"),
         ("Catalytic Converter", "Efficiency Below Threshold", "Check O2 Sensor first", "Batch-101"),
     ]
     cursor.executemany("INSERT INTO capa_records VALUES (?, ?, ?, ?)", capa)
 
-    # Schedule Slots (Next 3 Days)
-    # Storing simpler HH:MM format for reliable AI matching
+    # D. Schedule Slots
     print("   ...Seeding Appointment Slots...")
     slots = []
-    
-    # Create slots for tomorrow
-    base_date = datetime.now() + timedelta(days=1)
-    date_str = base_date.strftime("%Y-%m-%d") # Store date separately if needed, but for now we mix
-    
-    # We will store strictly HH:MM 24-hour format (09:00, 14:00) 
-    # to match the normalize logic in agents.py
+    # Store strictly HH:MM 24-hour format
     for hour in [9, 10, 11, 13, 14, 15, 16]: 
         slot_time = f"{hour:02d}:00" 
         slots.append((slot_time, False, None))
@@ -112,7 +135,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-    print("✅ Database 'fleet_data.db' reset and seeded successfully.")
+    print(f"✅ Database 'fleet_data.db' reset. Seeded {len(history_records)} historical records.")
 
 if __name__ == "__main__":
     init_db()
